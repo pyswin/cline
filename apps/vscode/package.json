@@ -44,7 +44,8 @@
 		"onUri",
 		"onStartupFinished",
 		"workspaceContains:evals.env",
-		"onCommand:clineFork.showDevInfo"
+		"onCommand:clineFork.showDevInfo",
+		"onCommand:clineFork.copyDiagnostics"
 	],
 	"main": "./dist/extension.js",
 	"contributes": {
@@ -246,6 +247,11 @@
 			{
 				"command": "clineFork.showDevInfo",
 				"title": "Cline-Fork: Show Dev Info",
+				"category": "Cline-Fork"
+			},
+			{
+				"command": "clineFork.copyDiagnostics",
+				"title": "Cline-Fork: Copy Diagnostics",
 				"category": "Cline-Fork"
 			}
 		],

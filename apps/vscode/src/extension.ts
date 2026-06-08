@@ -59,6 +59,11 @@ import { exportVSCodeStorageToSharedFiles } from "./hosts/vscode/vscode-to-file-
 import { ExtensionRegistryInfo } from "./registry";
 import { AuthService } from "./services/auth/AuthService";
 import { LogoutReason } from "./services/auth/types";
+import {
+	buildDevDiagnosticsMarkdown,
+	collectGitInfo,
+	collectMarkerStatuses,
+} from "./services/diagnostics/devDiagnostics";
 import { telemetryService } from "./services/telemetry";
 import {
 	LG_TASK_URI_PATH,
@@ -72,10 +77,43 @@ import { fileExistsAtPath } from "./utils/fs";
 // NOTE: This is VS Code specific - services that should be registered
 // for all-platform should be registered in common.ts.
 export async function activate(context: vscode.ExtensionContext) {
+	const getDevDiagnostics = async () => {
+		const workspaceFolders =
+			vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath) ??
+			[];
+		const primaryWorkspace = workspaceFolders[0];
+		const [git, markers] = await Promise.all([
+			collectGitInfo(primaryWorkspace),
+			collectMarkerStatuses(primaryWorkspace),
+		]);
+
+		return buildDevDiagnosticsMarkdown({
+			displayName: ExtensionRegistryInfo.name,
+			extensionName: ExtensionRegistryInfo.id,
+			extensionVersion: ExtensionRegistryInfo.version,
+			extensionMode: vscode.ExtensionMode[context.extensionMode],
+			vscodeVersion: vscode.version,
+			workspaceFolders,
+			platform: process.platform,
+			arch: process.arch,
+			nodeVersion: process.version,
+			git,
+			markers,
+		});
+	};
+
 	context.subscriptions.push(
-		vscode.commands.registerCommand("clineFork.showDevInfo", () => {
+		vscode.commands.registerCommand("clineFork.showDevInfo", async () => {
+			const document = await vscode.workspace.openTextDocument({
+				content: await getDevDiagnostics(),
+				language: "markdown",
+			});
+			await vscode.window.showTextDocument(document, { preview: true });
+		}),
+		vscode.commands.registerCommand("clineFork.copyDiagnostics", async () => {
+			await vscode.env.clipboard.writeText(await getDevDiagnostics());
 			vscode.window.showInformationMessage(
-				"Cline-Fork dev build is running. This message comes from your modified source code.",
+				"Cline-Fork diagnostics copied to clipboard.",
 			);
 		}),
 	);
