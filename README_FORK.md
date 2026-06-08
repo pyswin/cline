@@ -159,3 +159,45 @@ Cline-Fork: Show Dev Info
 -> 打包 VSIX
 -> 隔离环境安装测试
 ```
+
+## 直接提交本地main
+cd /Users/myfile/Documents/cline
+
+git checkout main
+git pull origin main
+
+# 修改代码
+git add .
+git commit -m "your change message"
+git push origin main
+
+
+
+## merge + 分支
+
+git checkout main
+git pull origin main
+git checkout -b feature-skill-logger
+
+
+
+git add .
+git commit -m "add skill logger"
+git push -u origin feature-skill-logger
+
+
+git checkout main
+git pull origin main
+git merge dev-visible-change
+git push origin main 
+
+
+
+## 同步远端更新：
+git fetch upstream
+git checkout main
+git merge upstream/main
+git push origin main
+
+
+
