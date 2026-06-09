@@ -215,6 +215,7 @@ export function createSearchTool(
 		name: "search_codebase",
 		description:
 			"Perform regex pattern searches across the codebase. " +
+			"Prefix a query with `semantic:` for lightweight semantic code search. " +
 			"Supports multiple parallel searches. " +
 			"Use for finding code patterns, function definitions, class names, imports, etc.",
 		inputSchema: zodToJsonSchema(SearchCodebaseInputSchema),
