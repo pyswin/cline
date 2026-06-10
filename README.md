@@ -11,7 +11,7 @@ The open source coding agent in your IDE and terminal.
 <div align="center">
 
 <div align="center">
-<table>
+<table>  
 <tbody>
 <td align="center">
 <a href="https://docs.cline.bot" target="_blank"><strong>Docs</strong></a>
@@ -25,8 +25,8 @@ The open source coding agent in your IDE and terminal.
 <td align="center">
 <a href="https://github.com/cline/cline/discussions/categories/feature-requests?discussions_q=is%3Aopen+category%3A%22Feature+Requests%22+sort%3Atop" target="_blank"><strong>Feature Requests</strong></a>
 </td>
-<td align="center">
-<a href="https://cline.bot/join-us" target="_blank"><strong>Join us!</strong></a>
+<td align="center">   
+<a href="https://cline.bot/join-us" target="_blank"><strong>Join us!</strong></a>  
 </td>
 </tbody>
 </table>
