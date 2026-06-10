@@ -44,6 +44,24 @@ export interface SearchExecutorOptions {
 	 * @default 20
 	 */
 	maxDepth?: number;
+
+	/**
+	 * Maximum number of semantic candidate chunks to score.
+	 * @default 500
+	 */
+	semanticMaxChunks?: number;
+
+	/**
+	 * Maximum characters per semantic result chunk.
+	 * @default 1200
+	 */
+	semanticChunkChars?: number;
+
+	/**
+	 * Optional semantic ranking hook. The default ranker is local and dependency-free;
+	 * hosts can replace it with an embedding/vector-store backed implementation.
+	 */
+	semanticRanker?: SemanticSearchRanker;
 }
 
 const DEFAULT_INCLUDE_EXTENSIONS = [
@@ -117,6 +135,82 @@ interface SearchMatch {
 	column: number;
 	match: string;
 	context: string[];
+}
+
+export interface SemanticSearchChunk {
+	file: string;
+	startLine: number;
+	endLine: number;
+	text: string;
+}
+
+export interface SemanticSearchResult extends SemanticSearchChunk {
+	score: number;
+}
+
+export type SemanticSearchRanker = (
+	query: string,
+	chunks: SemanticSearchChunk[],
+	context: AgentToolContext,
+) => Promise<SemanticSearchResult[]> | SemanticSearchResult[];
+
+const SEMANTIC_QUERY_PREFIXES = ["semantic:", "?semantic "];
+const DEFAULT_SEMANTIC_MAX_CHUNKS = 500;
+const DEFAULT_SEMANTIC_CHUNK_CHARS = 1200;
+
+function parseSemanticQuery(query: string): string | null {
+	const trimmed = query.trim();
+	const lower = trimmed.toLowerCase();
+
+	for (const prefix of SEMANTIC_QUERY_PREFIXES) {
+		if (lower.startsWith(prefix)) {
+			return trimmed.slice(prefix.length).trim();
+		}
+	}
+
+	return null;
+}
+
+function tokenizeForSemanticSearch(text: string): string[] {
+	const searchableText = text.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
+
+	return Array.from(
+		new Set(
+			searchableText
+				.toLowerCase()
+				.split(/[^a-z0-9]+/g)
+				.map((token) => token.trim())
+				.filter((token) => token.length >= 2),
+		),
+	);
+}
+
+function defaultSemanticRanker(
+	query: string,
+	chunks: SemanticSearchChunk[],
+): SemanticSearchResult[] {
+	const queryTokens = tokenizeForSemanticSearch(query);
+	if (queryTokens.length === 0) {
+		return [];
+	}
+
+	return chunks
+		.map((chunk) => {
+			const textTokens = new Set(
+				tokenizeForSemanticSearch(`${chunk.file}\n${chunk.text}`),
+			);
+			let score = 0;
+
+			for (const token of queryTokens) {
+				if (textTokens.has(token)) {
+					score += token.length >= 5 ? 2 : 1;
+				}
+			}
+
+			return { ...chunk, score };
+		})
+		.filter((result) => result.score > 0)
+		.sort((a, b) => b.score - a.score || a.file.localeCompare(b.file));
 }
 
 let rgAvailable: boolean | null = null;
@@ -289,6 +383,130 @@ function shouldIncludeFile(
 	return includeExtensions.has(ext) || (!ext && !fileName.startsWith("."));
 }
 
+function createSemanticChunks(
+	file: string,
+	content: string,
+	maxChunkChars: number,
+): SemanticSearchChunk[] {
+	const lines = content.split("\n");
+	const chunks: SemanticSearchChunk[] = [];
+	let startLine = 1;
+	let current: string[] = [];
+	let currentChars = 0;
+
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i] ?? "";
+		const nextChars = currentChars + line.length + 1;
+
+		if (current.length > 0 && nextChars > maxChunkChars) {
+			chunks.push({
+				file,
+				startLine,
+				endLine: i,
+				text: current.join("\n").trim(),
+			});
+			startLine = i + 1;
+			current = [];
+			currentChars = 0;
+		}
+
+		current.push(line);
+		currentChars += line.length + 1;
+	}
+
+	if (current.some((line) => line.trim().length > 0)) {
+		chunks.push({
+			file,
+			startLine,
+			endLine: lines.length,
+			text: current.join("\n").trim(),
+		});
+	}
+
+	return chunks;
+}
+
+async function searchSemantically(
+	query: string,
+	cwd: string,
+	context: AgentToolContext,
+	options: {
+		excludeDirsSet: Set<string>;
+		includeExtensionsSet: Set<string>;
+		maxDepth: number;
+		maxResults: number;
+		semanticChunkChars: number;
+		semanticMaxChunks: number;
+		semanticRanker: SemanticSearchRanker;
+	},
+): Promise<string> {
+	const chunks: SemanticSearchChunk[] = [];
+	let totalFilesScanned = 0;
+	const fileList = await getFileIndex(cwd);
+
+	for (const relativePath of fileList) {
+		if (context.signal?.aborted) {
+			throw new Error("Search operation aborted");
+		}
+
+		if (chunks.length >= options.semanticMaxChunks) {
+			break;
+		}
+
+		if (
+			!shouldIncludeFile(
+				relativePath,
+				options.excludeDirsSet,
+				options.includeExtensionsSet,
+				options.maxDepth,
+			)
+		) {
+			continue;
+		}
+
+		totalFilesScanned++;
+
+		try {
+			const content = await fs.readFile(path.join(cwd, relativePath), "utf-8");
+			for (const chunk of createSemanticChunks(
+				relativePath,
+				content,
+				options.semanticChunkChars,
+			)) {
+				if (chunks.length >= options.semanticMaxChunks) {
+					break;
+				}
+				chunks.push(chunk);
+			}
+		} catch {}
+	}
+
+	const ranked = (await options.semanticRanker(query, chunks, context))
+		.filter((result) => result.score > 0)
+		.sort((a, b) => b.score - a.score || a.file.localeCompare(b.file))
+		.slice(0, options.maxResults);
+
+	if (ranked.length === 0) {
+		return `No semantic results found for query: ${query}\nScanned ${totalFilesScanned} files.`;
+	}
+
+	const resultLines: string[] = [
+		`Found ${ranked.length} semantic result${ranked.length === 1 ? "" : "s"} for query: ${query}`,
+		`Scanned ${totalFilesScanned} files.`,
+		"",
+	];
+
+	for (const result of ranked) {
+		resultLines.push(
+			`${result.file}:${result.startLine}-${result.endLine} score=${result.score.toFixed(2)}`,
+		);
+		resultLines.push(result.text);
+		resultLines.push("");
+	}
+
+	return resultLines.join("\n");
+}
+
 /**
  * Create a search executor using regex pattern matching
  *
@@ -311,6 +529,9 @@ export function createSearchExecutor(
 		maxResults = 100,
 		contextLines = 2,
 		maxDepth = 20,
+		semanticMaxChunks = DEFAULT_SEMANTIC_MAX_CHUNKS,
+		semanticChunkChars = DEFAULT_SEMANTIC_CHUNK_CHARS,
+		semanticRanker = defaultSemanticRanker,
 	} = options;
 	const excludeDirsSet = new Set(excludeDirs);
 	const includeExtensionsSet = new Set(
@@ -325,6 +546,19 @@ export function createSearchExecutor(
 		// Check for abort before starting
 		if (context.signal?.aborted) {
 			throw new Error("Search operation aborted");
+		}
+
+		const semanticQuery = parseSemanticQuery(query);
+		if (semanticQuery) {
+			return searchSemantically(semanticQuery, cwd, context, {
+				excludeDirsSet,
+				includeExtensionsSet,
+				maxDepth,
+				maxResults,
+				semanticChunkChars,
+				semanticMaxChunks,
+				semanticRanker,
+			});
 		}
 
 		// Try ripgrep first if available
