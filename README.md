@@ -57,8 +57,8 @@ npm i -g cline
 </td>
 <td align="center" width="50%">
 
-### Kanban
-
+### Kanban    
+   
 Run many agents in parallel from a
 web-based task board. Each card gets its own
 worktree, auto-commit, and dependency chains.
@@ -67,7 +67,7 @@ worktree, auto-commit, and dependency chains.
 npm i -g kanban
 ```
 
-<a href="https://github.com/cline/kanban">Learn more</a>
+<a href="https://github.com/cline/kanban">Learn more</a>   
 <br><br>
 
 </td>
